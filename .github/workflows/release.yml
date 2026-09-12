@@ -158,11 +158,12 @@ jobs:
 
       - name: Sign portable exe (Windows)
         if: runner.os == 'Windows'
+        timeout-minutes: 5
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          npx @tauri-apps/cli signer sign "baseapp-${{ needs.validate.outputs.version }}-portable.exe"
+          npx --no-install tauri signer sign "baseapp-${{ needs.validate.outputs.version }}-portable.exe" < /dev/null
 
       - name: Point latest.json at portable exe (Windows)
         if: runner.os == 'Windows'
