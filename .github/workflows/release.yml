@@ -52,7 +52,7 @@ jobs:
           CUR_PKG=$(jq -r '.version' package.json)
           CUR_LOCK=$(jq -r '.packages[""].version' package-lock.json)
           CUR_TAURI=$(jq -r '.version' src-tauri/tauri.conf.json)
-          CUR_CARGO=$(grep -m1 -E '^version = "' src-tauri/Cargo.toml | sed -E 's/^version = "(.*)"/\1/')
+          CUR_CARGO=$(sed -n -E '/^\[package\]/,/^\[/s/^version = "([^"]*)"\r?$/\1/p' src-tauri/Cargo.toml)
           if [ "$CUR_PKG" = "$VERSION" ] && [ "$CUR_LOCK" = "$VERSION" ] && [ "$CUR_TAURI" = "$VERSION" ] && [ "$CUR_CARGO" = "$VERSION" ]; then
             echo "All version files already at $VERSION, skipping writes."
             exit 0
@@ -78,21 +78,27 @@ jobs:
           if git diff --cached --quiet; then
             echo "Versions already at $VERSION, nothing to commit."
           else
-            git commit -m "chore(release): v$VERSION"
+            git commit -m "chore(main): release $VERSION"
             git push
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   build:
+    name: build (${{ matrix.name }})
     needs: [validate, bump-version]
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - name: Windows x86_64
+            os: windows-latest
             target: x86_64-pc-windows-msvc
-          - os: ubuntu-22.04
+          - name: Linux x86_64
+            os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+          - name: macOS Apple Silicon
+            os: macos-latest
+            target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -104,11 +110,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: cargo
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
