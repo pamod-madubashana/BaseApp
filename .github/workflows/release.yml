@@ -49,7 +49,15 @@ jobs:
       - name: Update version files
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
-          echo "Bumping to $VERSION"
+          CUR_PKG=$(jq -r '.version' package.json)
+          CUR_LOCK=$(jq -r '.packages[""].version' package-lock.json)
+          CUR_TAURI=$(jq -r '.version' src-tauri/tauri.conf.json)
+          CUR_CARGO=$(grep -m1 -E '^version = "' src-tauri/Cargo.toml | sed -E 's/^version = "(.*)"/\1/')
+          if [ "$CUR_PKG" = "$VERSION" ] && [ "$CUR_LOCK" = "$VERSION" ] && [ "$CUR_TAURI" = "$VERSION" ] && [ "$CUR_CARGO" = "$VERSION" ]; then
+            echo "All version files already at $VERSION, skipping writes."
+            exit 0
+          fi
+          echo "Bumping to $VERSION (package.json=$CUR_PKG package-lock=$CUR_LOCK tauri.conf=$CUR_TAURI Cargo.toml=$CUR_CARGO)"
           jq --arg v "$VERSION" '.version = $v' package.json > /tmp/package.json && mv /tmp/package.json package.json
           jq --arg v "$VERSION" '.version = $v | .packages[""].version = $v' package-lock.json > /tmp/package-lock.json && mv /tmp/package-lock.json package-lock.json
           jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > /tmp/tauri.conf.json && mv /tmp/tauri.conf.json src-tauri/tauri.conf.json
@@ -134,3 +142,77 @@ jobs:
         run: |
           cp "src-tauri/target/${{ matrix.target }}/release/baseapp.exe" "baseapp-${{ needs.validate.outputs.version }}-portable.exe"
           gh release upload "v${{ needs.validate.outputs.version }}" "baseapp-${{ needs.validate.outputs.version }}-portable.exe" --clobber
+
+      - name: Sign portable exe (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          npx @tauri-apps/cli signer sign "baseapp-${{ needs.validate.outputs.version }}-portable.exe"
+
+      - name: Point latest.json at portable exe (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          TAG="v$RELEASE_VERSION"
+          EXE="baseapp-$RELEASE_VERSION-portable.exe"
+          gh release download "$TAG" --pattern latest.json --clobber
+          node -e "const fs = require('fs'); const v = process.env.RELEASE_VERSION; const tag = 'v' + v; const repo = process.env.GITHUB_REPOSITORY; const exe = 'baseapp-' + v + '-portable.exe'; const sig = fs.readFileSync(exe + '.sig'); const latest = JSON.parse(fs.readFileSync('latest.json', 'utf8')); latest.platforms['windows-x86_64'].url = 'https://github.com/' + repo + '/releases/download/' + tag + '/' + exe; latest.platforms['windows-x86_64'].signature = Buffer.from(sig).toString('base64'); fs.writeFileSync('latest.json', JSON.stringify(latest, null, 2) + '\n');"
+          echo "windows-x86_64 now points at $EXE"
+
+      - name: Upload portable signature (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          gh release upload "v$VERSION" "baseapp-$VERSION-portable.exe.sig" latest.json --clobber
+
+  publish:
+    name: Publish GitHub release
+    needs: [validate, bump-version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.sha }}
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          set -e
+          if [ -n "${{ needs.validate.outputs.version }}" ]; then
+            ver="${{ needs.validate.outputs.version }}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            ver="${{ inputs.version }}"
+          else
+            ver="$(node -p "require('./package.json').version")"
+          fi
+          ver="${ver#v}"
+          tag="v$ver"
+          file_ver="v$(node -p "require('./package.json').version")"
+          file_ver="v${file_ver#v}"
+          if [ "$tag" != "$file_ver" ]; then
+            echo "::error::Release tag $tag does not match version files ($file_ver). Bump version files first."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create release and upload assets
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.tag.outputs.tag }}
+          name: Release ${{ steps.tag.outputs.tag }}
+          generateReleaseNotes: true
+          allowUpdates: true
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
