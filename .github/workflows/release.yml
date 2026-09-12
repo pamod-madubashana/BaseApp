@@ -126,3 +126,11 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
+
+      - name: Upload portable exe (Windows)
+        if: runner.os == 'Windows'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp "src-tauri/target/${{ matrix.target }}/release/baseapp.exe" "baseapp-${{ needs.validate.outputs.version }}-portable.exe"
+          gh release upload "v${{ needs.validate.outputs.version }}" "baseapp-${{ needs.validate.outputs.version }}-portable.exe" --clobber
