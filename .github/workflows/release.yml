@@ -13,9 +13,70 @@ on:
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.normalize.outputs.version }}
+    steps:
+      - id: normalize
+        run: |
+          RAW="${{ inputs.version }}"
+          if [ -z "$RAW" ] && [ "${{ github.ref_type }}" = "tag" ]; then
+            RAW="${{ github.ref_name }}"
+          fi
+          VERSION="${RAW#v}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid version '$RAW'. Expected SemVer X.Y.Z with optional leading v."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Normalized version: $VERSION"
+
+  bump-version:
+    needs: [validate]
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.push.outputs.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update version files
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          echo "Bumping to $VERSION"
+          jq --arg v "$VERSION" '.version = $v' package.json > /tmp/package.json && mv /tmp/package.json package.json
+          jq --arg v "$VERSION" '.version = $v | .packages[""].version = $v' package-lock.json > /tmp/package-lock.json && mv /tmp/package-lock.json package-lock.json
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > /tmp/tauri.conf.json && mv /tmp/tauri.conf.json src-tauri/tauri.conf.json
+          sed -i -E "0,/^version = \".*\"/s//version = \"$VERSION\"/" src-tauri/Cargo.toml
+          echo "--- diff ---"
+          git diff -- package.json package-lock.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+          if git status --porcelain | grep -q "src-tauri/Cargo.lock"; then
+            echo "::warning::Cargo.lock churn detected — leaving it uncommitted; CI cargo will regenerate it."
+          fi
+
+      - name: Commit and push
+        id: push
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+          if git diff --cached --quiet; then
+            echo "Versions already at $VERSION, nothing to commit."
+          else
+            git commit -m "chore(release): v$VERSION"
+            git push
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: [validate, bump-version]
     strategy:
       fail-fast: false
       matrix:
@@ -28,6 +89,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -54,9 +117,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
-          releaseName: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
-          releaseBody: "See the assets to download this version and install."
+          tagName: v${{ needs.validate.outputs.version }}
+          releaseName: v${{ needs.validate.outputs.version }}
+          releaseBody: |
+            See the assets to download this version and install.
+
+            Full changelog: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate.outputs.version }} (GitHub auto-generated notes).
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
