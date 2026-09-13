@@ -8,7 +8,21 @@ type UpdaterState =
   | { status: "idle" }
   | { status: "available"; version: string }
   | { status: "downloading"; version: string; progress: number | null }
-  | { status: "ready"; version: string };
+  | { status: "installing"; version: string }
+  | { status: "ready"; version: string }
+  | { status: "error"; version: string | null; message: string };
+
+function toErrorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    const message = err.message.trim();
+    return message.length > 0 ? message : err.name;
+  }
+  if (typeof err === "string") {
+    const message = err.trim();
+    return message.length > 0 ? message : "Unknown error";
+  }
+  return "Unknown error";
+}
 
 const initialState: UpdaterState = { status: "checking" };
 
@@ -16,36 +30,35 @@ function Updater() {
   const [state, setState] = useState<UpdaterState>(initialState);
   const updateRef = useRef<Update | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function runCheck(): Promise<void> {
-      try {
-        const update = await check();
-        if (cancelled) {
-          if (update) {
-            await update.close();
-          }
-          return;
-        }
+  const runCheck = useCallback(async (cancelled: { value: boolean }): Promise<void> => {
+    try {
+      const update = await check();
+      if (cancelled.value) {
         if (update) {
-          updateRef.current = update;
-          setState({ status: "available", version: update.version });
-        } else {
-          setState({ status: "idle" });
+          await update.close();
         }
-      } catch (err) {
-        console.error("[updater] check failed:", err);
-        if (!cancelled) {
-          setState({ status: "idle" });
-        }
+        return;
+      }
+      if (update) {
+        updateRef.current = update;
+        setState({ status: "available", version: update.version });
+      } else {
+        setState({ status: "idle" });
+      }
+    } catch (err) {
+      console.error("[updater] check failed:", err);
+      if (!cancelled.value) {
+        setState({ status: "error", version: null, message: toErrorMessage(err) });
       }
     }
+  }, []);
 
-    void runCheck();
+  useEffect(() => {
+    const cancelled = { value: false };
+    void runCheck(cancelled);
 
     return () => {
-      cancelled = true;
+      cancelled.value = true;
       const pending = updateRef.current;
       updateRef.current = null;
       if (pending) {
@@ -54,7 +67,7 @@ function Updater() {
         });
       }
     };
-  }, []);
+  }, [runCheck]);
 
   const handleUpdate = useCallback(async (): Promise<void> => {
     const update = updateRef.current;
@@ -97,6 +110,7 @@ function Updater() {
     try {
       await update.downloadAndInstall(onEvent);
       updateRef.current = null;
+      setState({ status: "installing", version });
       try {
         await relaunch();
       } catch (relaunchErr) {
@@ -105,17 +119,37 @@ function Updater() {
       }
     } catch (err) {
       console.error("[updater] download/install failed:", err);
-      setState({ status: "available", version });
+      setState({ status: "error", version, message: toErrorMessage(err) });
     }
   }, []);
 
-  const handleRestart = useCallback(async (): Promise<void> => {
+  const handleRestart = useCallback(async (version: string): Promise<void> => {
     try {
       await relaunch();
     } catch (err) {
       console.error("[updater] relaunch failed:", err);
+      setState({ status: "error", version, message: toErrorMessage(err) });
     }
   }, []);
+
+  const handleRetry = useCallback(async (): Promise<void> => {
+    if (state.status !== "error") {
+      return;
+    }
+    if (state.version === null) {
+      // Check failed and there is no cached update — re-run the check.
+      setState({ status: "checking" });
+      await runCheck({ value: false });
+      return;
+    }
+    if (updateRef.current !== null) {
+      // Download/install failed and the update is still cached — retry it.
+      await handleUpdate();
+      return;
+    }
+    // Relaunch failed after a successful install — retry the relaunch.
+    await handleRestart(state.version);
+  }, [state, handleUpdate, handleRestart, runCheck]);
 
   if (state.status === "checking" || state.status === "idle") {
     return null;
@@ -158,11 +192,32 @@ function Updater() {
         </>
       )}
 
+      {state.status === "installing" && (
+        <>
+          <button type="button" disabled>
+            Installing v{state.version} — finishing up…
+          </button>
+          <progress aria-label="Installing update" />
+        </>
+      )}
+
       {state.status === "ready" && (
         <>
           <span>Update v{state.version} installed — restart to apply.</span>
-          <button type="button" onClick={() => void handleRestart()}>
+          <button type="button" onClick={() => void handleRestart(state.version)}>
             Restart now
+          </button>
+        </>
+      )}
+
+      {state.status === "error" && (
+        <>
+          <span role="alert">
+            Update{state.version !== null ? ` v${state.version}` : ""} failed:{" "}
+            {state.message}
+          </span>
+          <button type="button" onClick={() => void handleRetry()}>
+            Retry
           </button>
         </>
       )}
