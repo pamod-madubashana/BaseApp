@@ -78,7 +78,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "Versions already at $VERSION, nothing to commit."
           else
-            git commit -m "chore(main): release $VERSION"
+            git commit -m "chore(release): v$VERSION"
             git push
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
