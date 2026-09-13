@@ -10,6 +10,7 @@
   <img src="https://img.shields.io/badge/TypeScript-6.0.3-3178C6.svg" alt="TypeScript">
   <img src="https://img.shields.io/badge/Vite-8.0.16-646CFF.svg" alt="Vite">
   <img src="https://img.shields.io/badge/Rust-stable-DEA584.svg" alt="Rust">
+  <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
 </p>
 
 <p align="center">Production-ready Tauri v2 + React 19 + TypeScript + Vite template with signed auto-updates via GitHub Releases.</p>
@@ -184,23 +185,21 @@ React (Vite, port 1420)  ──invoke/check──▶  Rust (Tauri Builder)
 
 ## Tech Stack
 
-| Tech | Version | Badge |
-|---|---|---|
-| Tauri | `2` | ![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB.svg) |
-| React | `19.1.0` | ![React](https://img.shields.io/badge/React-19.1.0-61DAFB.svg) |
-| TypeScript | `~6.0.3` | ![TypeScript](https://img.shields.io/badge/TypeScript-6.0.3-3178C6.svg) |
-| Vite | `8.0.16` | ![Vite](https://img.shields.io/badge/Vite-8.0.16-646CFF.svg) |
-| Rust | `stable` / `2021` | ![Rust](https://img.shields.io/badge/Rust-stable-DEA584.svg) |
-| Node.js | `20` | ![Node](https://img.shields.io/badge/Node.js-20-339933.svg) |
-| Plugins | `opener 2`, `updater 2.11.0`, `process 2.3.1` | — |
+| Tech | Version |
+|---|---|
+| Tauri | `2` |
+| React | `19.1.0` |
+| TypeScript | `~6.0.3` |
+| Vite | `8.0.16` |
+| Rust | `stable` / `2021` |
+| Node.js | `20` |
+| Plugins | `opener 2`, `updater 2.11.0`, `process 2.3.1` |
 
 Derived from `package.json`, `src-tauri/Cargo.toml`, `vite.config.ts`, and `.github/workflows/*.yml`.
 
 ## Downloads
 
-No published release yet — tags `v*` trigger the release workflow.
-
-Once released (`v1.0.0` → `vX.Y.Z`), assets appear at `https://github.com/pamod-madubashana/BaseApp/releases/latest`:
+Assets are published at [latest release](https://github.com/pamod-madubashana/BaseApp/releases/latest):
 
 - **Windows** — `*.msi`, `*-setup.exe` (NSIS), `baseapp-<version>-portable.exe` (portable, uploaded via `gh release upload`)
 - **Linux** — `*.deb`, `*.rpm`, `*.AppImage`
@@ -233,6 +232,6 @@ Install via download — no npm/cargo package.
 - [x] Concise structure tree matches actual repo
 - [x] Quick start (install/dev/build) verified against `package.json`
 - [x] Documentation links point to real repo URLs
-- [x] License section omitted — no `LICENSE` file found (flagged here)
+- [x] MIT License added
 - [x] Markdown: semantic headings, fenced code blocks with language tags, tables for structured data
 - [x] Owner style mirrored from sampled repos (see return)
